@@ -59,4 +59,42 @@ router.post("/:groupId/youths", authRequired, requireRole("facilitator"), async 
   res.status(201).json({ ok: true, youthId: youth._id });
 });
 
+router.get("/my", authRequired, requireRole("facilitator"), async (req, res) => {
+  const groups = await Group.find({ facilitatorId: req.user.sub })
+    .select("_id name members createdAt updatedAt")
+    .lean();
+
+  // Opcional: enviar conteo sin mandar todo el array si quieres
+  const mapped = groups.map(g => ({
+    _id: g._id,
+    name: g.name,
+    memberCount: Array.isArray(g.members) ? g.members.length : 0
+  }));
+
+  res.json({ ok: true, groups: mapped });
+});
+
+router.get("/:groupId/members", authRequired, requireRole("facilitator"), async (req, res) => {
+  const { groupId } = req.params;
+
+  const group = await Group.findById(groupId).populate("members", "name email role");
+  if (!group) return res.status(404).json({ ok: false, error: "Group not found" });
+
+  // Seguridad: solo el facilitador dueño puede ver sus miembros
+  if (String(group.facilitatorId) !== req.user.sub) {
+    return res.status(403).json({ ok: false, error: "Not your group" });
+  }
+
+  // Filtra por si acaso, para asegurar solo youth
+  const members = (group.members || [])
+    .filter(m => m.role === "youth")
+    .map(m => ({ id: String(m._id), name: m.name, email: m.email }));
+
+  return res.json({
+    ok: true,
+    group: { id: String(group._id), name: group.name, memberCount: members.length },
+    members
+  });
+});
+
 module.exports = router;

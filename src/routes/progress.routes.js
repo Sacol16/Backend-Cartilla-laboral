@@ -1,3 +1,4 @@
+// routes/progress.routes.js
 const express = require("express");
 const { z } = require("zod");
 const { authRequired } = require("../middleware/auth");
@@ -6,30 +7,58 @@ const Group = require("../models/Group");
 
 const router = express.Router();
 
-// Joven guarda su progreso
+// Puedes cambiar la lógica: average, sum, max, etc.
+function computeOverallScore(modules) {
+  if (!modules || modules.length === 0) return 0;
+  const sum = modules.reduce((acc, m) => acc + (Number(m.score) || 0), 0);
+  return Math.round(sum / modules.length); // promedio redondeado
+}
+
+// Joven guarda progreso de UN módulo dentro del arreglo `modules`
 router.put("/modules/:moduleId", authRequired, async (req, res) => {
   if (req.user.role !== "youth") return res.status(403).json({ ok: false, error: "Only youth" });
 
   const schema = z.object({
     score: z.number().min(0).max(100).optional(),
     done: z.boolean().optional(),
-    data: z.record(z.any()).optional()
+    data: z.unknown().optional(), // data libre (Module1ActivityManager, etc)
   });
+
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
 
   const { moduleId } = req.params;
+  const { score, done, data } = parsed.data;
+  const safeData = (data && typeof data === "object") ? data : {};
 
-  const doc = await Progress.findOneAndUpdate(
-    { youthId: req.user.sub, moduleId },
-    { $set: { ...parsed.data } },
-    { upsert: true, new: true }
-  );
+  // 1) Traer/crear el documento del youth
+  let doc = await Progress.findOne({ youthId: req.user.sub });
+  if (!doc) doc = await Progress.create({ youthId: req.user.sub, score: 0, modules: [] });
 
+  // 2) Insertar/actualizar el item del módulo dentro del array
+  const idx = doc.modules.findIndex((m) => m.moduleId === moduleId);
+
+  if (idx === -1) {
+    doc.modules.push({
+      moduleId,
+      score: typeof score === "number" ? score : 0,
+      done: typeof done === "boolean" ? done : false,
+      data: data || {},
+    });
+  } else {
+    if (typeof score === "number") doc.modules[idx].score = score;
+    if (typeof done === "boolean") doc.modules[idx].done = done;
+    if (data && typeof data === "object") doc.modules[idx].data = data;
+  }
+
+  // 3) Recalcular score general
+  doc.score = computeOverallScore(doc.modules);
+
+  await doc.save();
   res.json({ ok: true, progress: doc });
 });
 
-// Facilitador ve progreso de un grupo
+// Facilitador ve progreso de un grupo (ahora devuelve 1 doc por youth)
 router.get("/groups/:groupId", authRequired, async (req, res) => {
   if (req.user.role !== "facilitator") return res.status(403).json({ ok: false, error: "Only facilitator" });
 

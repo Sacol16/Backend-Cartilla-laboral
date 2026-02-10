@@ -5,6 +5,7 @@ const { z } = require("zod");
 const User = require("../models/User");
 
 const router = express.Router();
+const { authRequired } = require("../middleware/auth");
 
 const registerFacSchema = z.object({
   email: z.string().email(),
@@ -64,6 +65,22 @@ router.post("/login", async (req, res) => {
     ok: true,
     token,
     user: { id: user._id, role: user.role, name: user.name, email: user.email, groupId: user.groupId }
+  });
+});
+
+router.get("/me", authRequired, async (req, res) => {
+  const user = await User.findById(req.user.sub).select("_id name email role groupId").lean();
+  if (!user) return res.status(404).json({ ok: false, error: "User not found" });
+
+  res.json({
+    ok: true,
+    user: {
+      id: String(user._id),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      groupId: user.groupId ? String(user.groupId) : null
+    }
   });
 });
 
