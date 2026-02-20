@@ -74,4 +74,49 @@ router.get("/groups/:groupId", authRequired, async (req, res) => {
   res.json({ ok: true, progress });
 });
 
+// routes/progress.js
+router.get("/youth/:youthId", authRequired, async (req, res) => {
+  const { youthId } = req.params;
+
+  const doc = await Progress.findOne({ youthId }).lean();
+
+  if (!doc) {
+    return res.json({ ok: true, progress: [] });
+  }
+
+  const progress = (doc.modules || []).map((m) => ({
+    _id: String(doc._id),                 // id del doc general (suficiente para UI)
+    youthId: String(doc.youthId),
+    moduleId: String(m.moduleId),         // <-- lo que te faltaba
+    score: typeof m.score === "number" ? m.score : 0,
+    done: !!m.done,
+    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null,
+  }));
+
+  return res.json({ ok: true, progress });
+});
+
+// GET progreso de un estudiante por módulo
+// /progress/youth/:youthId/module/:moduleId
+router.get("/youth/:youthId/module/:moduleId", authRequired, async (req, res) => {
+  const { youthId, moduleId } = req.params;
+
+  const doc = await Progress.findOne({ youthId }).lean();
+  if (!doc) return res.json({ ok: true, module: null });
+
+  const mod = (doc.modules || []).find(m => String(m.moduleId) === String(moduleId));
+  if (!mod) return res.json({ ok: true, module: null });
+
+  return res.json({
+    ok: true,
+    module: {
+      moduleId: String(mod.moduleId),
+      score: typeof mod.score === "number" ? mod.score : 0,
+      done: !!mod.done,
+      data: mod.data || {},
+      updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null
+    }
+  });
+});
+
 module.exports = router;
