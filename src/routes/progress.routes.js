@@ -113,7 +113,7 @@ router.get("/youth/:youthId/module/:moduleId", authRequired, async (req, res) =>
       moduleId: String(mod.moduleId),
       score: typeof mod.score === "number" ? mod.score : 0,
       done: !!mod.done,
-      data: mod.data || {},
+      dataJson: JSON.stringify(mod.data || {}),
       updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null
     }
   });
