@@ -16,7 +16,8 @@ function computeOverallScore(modules) {
 
 // Joven guarda progreso de UN módulo dentro del arreglo `modules`
 router.put("/modules/:moduleId", authRequired, async (req, res) => {
-  if (req.user.role !== "youth") return res.status(403).json({ ok: false, error: "Only youth" });
+  if (req.user.role !== "youth")
+    return res.status(403).json({ ok: false, error: "Only youth" });
 
   const schema = z.object({
     score: z.number().min(0).max(100).optional(),
@@ -25,53 +26,107 @@ router.put("/modules/:moduleId", authRequired, async (req, res) => {
   });
 
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
+  if (!parsed.success)
+    return res.status(400).json({ ok: false, error: parsed.error.issues });
 
   const { moduleId } = req.params;
   const { score, done, data } = parsed.data;
-  const safeData = (data && typeof data === "object") ? data : {};
+  const safeData = data && typeof data === "object" ? data : {};
 
-  // 1) Traer/crear el documento del youth
-  let doc = await Progress.findOne({ youthId: req.user.sub });
-  if (!doc) doc = await Progress.create({ youthId: req.user.sub, score: 0, modules: [] });
+  try {
+    // 1) Traer/crear el documento del youth
+    let doc = await Progress.findOne({ youthId: req.user.sub });
 
-  // 2) Insertar/actualizar el item del módulo dentro del array
-  const idx = doc.modules.findIndex((m) => m.moduleId === moduleId);
+    if (!doc) {
+      doc = await Progress.create({
+        youthId: req.user.sub,
+        score: 0,
+        modules: [],
+      });
+    }
 
-  if (idx === -1) {
-    doc.modules.push({
-      moduleId,
-      score: typeof score === "number" ? score : 0,
-      done: typeof done === "boolean" ? done : false,
-      data: data || {},
+    // 2) Insertar/actualizar el módulo
+    const idx = doc.modules.findIndex((m) => m.moduleId === moduleId);
+
+    if (idx === -1) {
+      doc.modules.push({
+        moduleId,
+        score: typeof score === "number" ? score : 0,
+        done: typeof done === "boolean" ? done : false,
+        data: safeData,
+      });
+    } else {
+      if (typeof score === "number") doc.modules[idx].score = score;
+      if (typeof done === "boolean") doc.modules[idx].done = done;
+      if (data && typeof data === "object") doc.modules[idx].data = safeData;
+    }
+
+    // 3) Score general = score del último módulo terminado
+    const completedModules = doc.modules.filter((m) => m.done);
+
+    if (completedModules.length > 0) {
+      const lastCompleted = completedModules[completedModules.length - 1];
+      doc.score = lastCompleted.score || 0;
+    } else {
+      doc.score = 0;
+    }
+
+    await doc.save();
+
+    res.json({
+      ok: true,
+      progress: doc,
     });
-  } else {
-    if (typeof score === "number") doc.modules[idx].score = score;
-    if (typeof done === "boolean") doc.modules[idx].done = done;
-    if (data && typeof data === "object") doc.modules[idx].data = data;
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      ok: false,
+      error: "Server error",
+    });
   }
-
-  // 3) Recalcular score general
-  doc.score = computeOverallScore(doc.modules);
-
-  await doc.save();
-  res.json({ ok: true, progress: doc });
 });
 
 // Facilitador ve progreso de un grupo (ahora devuelve 1 doc por youth)
 router.get("/groups/:groupId", authRequired, async (req, res) => {
-  if (req.user.role !== "facilitator") return res.status(403).json({ ok: false, error: "Only facilitator" });
+  if (req.user.role !== "facilitator")
+    return res.status(403).json({ ok: false, error: "Only facilitator" });
 
   const { groupId } = req.params;
-  const group = await Group.findById(groupId);
-  if (!group) return res.status(404).json({ ok: false, error: "Group not found" });
 
-  if (String(group.facilitatorId) !== req.user.sub) {
-    return res.status(403).json({ ok: false, error: "Not your group" });
+  try {
+    const group = await Group.findById(groupId);
+    if (!group)
+      return res.status(404).json({ ok: false, error: "Group not found" });
+
+    if (String(group.facilitatorId) !== req.user.sub) {
+      return res.status(403).json({ ok: false, error: "Not your group" });
+    }
+
+    const progress = await Progress.find({
+      youthId: { $in: group.members },
+    });
+
+    // Promedio del grupo
+    let groupAverage = 0;
+
+    if (progress.length > 0) {
+      const total = progress.reduce((acc, p) => acc + (p.score || 0), 0);
+      groupAverage = Math.round(total / progress.length);
+    }
+
+    res.json({
+      ok: true,
+      groupAverage,
+      members: progress.length,
+      progress
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      ok: false,
+      error: "Server error",
+    });
   }
-
-  const progress = await Progress.find({ youthId: { $in: group.members } });
-  res.json({ ok: true, progress });
 });
 
 // routes/progress.js
