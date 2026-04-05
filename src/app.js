@@ -9,6 +9,9 @@ const progressRoutes = require("./routes/progress.routes");
 
 const app = express();
 
+// ✅ IMPORTANTE para Railway / Render / Heroku
+app.set("trust proxy", 1);
+
 app.use(helmet());
 
 // ⬇️ sube el límite (audio + png base64 lo necesitan)
